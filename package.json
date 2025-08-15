@@ -27,12 +27,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-username/release-cinema.git"
+    "url": "git+https://github.com/hunt3r157/release-cinema.git"
   },
   "bugs": {
-    "url": "https://github.com/your-username/release-cinema/issues"
+    "url": "https://github.com/hunt3r157/release-cinema/issues"
   },
-  "homepage": "https://github.com/your-username/release-cinema#readme",
+  "homepage": "https://github.com/hunt3r157/release-cinema#readme",
   "scripts": {
     "cinema": "node bin/release-cinema.mjs render --auto --out-dir assets"
   }

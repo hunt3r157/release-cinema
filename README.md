@@ -2,8 +2,8 @@
 
 > Make your releases **cinematic**. Zero‑dep Node CLI + GitHub Action that renders a short trailer (GIF/MP4) summarizing a tag’s highlights **and** a **CLI simulation** of the release run.
 
-[![build](https://img.shields.io/github/actions/workflow/status/<your-username>/release-cinema/ci.yml?branch=main&label=build)](https://github.com/<your-username>/release-cinema/actions/workflows/ci.yml)
-[![release](https://img.shields.io/github/actions/workflow/status/<your-username>/release-cinema/release.yml?label=release)](https://github.com/<your-username>/release-cinema/actions/workflows/release.yml)
+[![build](https://img.shields.io/github/actions/workflow/status/hunt3r157/release-cinema/ci.yml?branch=main&label=build)](https://github.com/hunt3r157/release-cinema/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/actions/workflow/status/hunt3r157/release-cinema/release.yml?label=release)](https://github.com/hunt3r157/release-cinema/actions/workflows/release.yml)
 [![npm](https://img.shields.io/npm/v/release-cinema.svg)](https://www.npmjs.com/package/release-cinema)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 

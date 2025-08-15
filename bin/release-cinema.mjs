@@ -23,6 +23,16 @@ const flags = parseFlags(args);
 
 if (!['render','analyze','simulate'].includes(cmd)) { usage(); process.exit(1); }
 
+const theme = {
+  bg: '#0b0f14',
+  fg: '#e5e9f0',
+  accent: '#7aa2f7',
+  mono: 'DejaVu-Sans-Mono',
+  sans: 'DejaVu-Sans',
+  width: 1280,
+  height: 720,
+};
+
 function run(cmd, opts={}) {
   return cp.execSync(cmd, { stdio: ['ignore','pipe','pipe'], encoding: 'utf8', ...opts }).trim();
 }
@@ -82,51 +92,110 @@ function analyze(from, to) {
   };
 }
 
-// Safely build a caption image via ImageMagick by compositing onto a base canvas
-function writeTextImage(text, outPath, opts={}) {
+function q(s){ return '"' + String(s).replace(/(["\$])/g,'\\$1') + '"'; }
+
+// ---------- Trailer: centered “card” frame ----------
+function writeCardFrame(title, bodyLines, outPath, opts={}) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-'));
+  const tfTitle = path.join(tmp, 'title.txt');
+  const tfBody  = path.join(tmp, 'body.txt');
+  fs.writeFileSync(tfTitle, title, 'utf8');
+  fs.writeFileSync(tfBody,  bodyLines.join('\n'), 'utf8');
+
+  const W = Number(opts.width ?? theme.width);
+  const H = Number(opts.height ?? theme.height);
+  const cardW = Math.round(W*0.78);
+  const cardH = Math.round(H*0.56);
+  const bodyW = cardW - 140;              // inner width for text
+  const titlePt = Number(opts.titlePt ?? 64);
+  const bodyPt  = Number(opts.bodyPt  ?? 34);
+
+  const cardTop = Math.floor((H - cardH)/2);
+  const titleY  = cardTop + 42;
+  const bodyY   = cardTop + 120;
+
+  // Base
+  run(['convert','-size',`${W}x${H}`,`xc:${theme.bg}`,q(path.join(tmp,'base.png'))].join(' '));
+
+  // Card with subtle border
+  const draw1 = `roundrectangle 0,0 ${cardW-1},${cardH-1} 36,36`;
+  const draw2 = `roundrectangle 1,1 ${cardW-2},${cardH-2} 36,36`;
+  run([
+    'convert','-size',`${cardW}x${cardH}`,'xc:none',
+    '-fill', q('rgba(255,255,255,0.06)'), '-draw', q(draw1),
+    '-stroke', q('#7aa2f744'), '-strokewidth','2', '-draw', q(draw2),
+    q(path.join(tmp,'card.png'))
+  ].join(' '));
+
+  // Title (single-line label)
+  run([
+    'convert','-background','none','-fill',q(theme.accent),'-font',q(theme.sans),
+    '-pointsize', String(titlePt), '-size', `${bodyW}x`,
+    `caption:@${q(tfTitle)}`,
+    q(path.join(tmp,'title.png'))
+  ].join(' '));
+
+  // Body (wrapped caption)
+  run([
+    'convert','-background','none','-fill',q(theme.fg),'-font',q(theme.sans),
+    '-pointsize', String(bodyPt), '-size', `${bodyW}x`,
+    `caption:@${q(tfBody)}`,
+    q(path.join(tmp,'body.png'))
+  ].join(' '));
+
+  // Compose: base + card (center) + title (absolute from top) + body (absolute from top)
+  run(['convert',
+       q(path.join(tmp,'base.png')),
+       q(path.join(tmp,'card.png')),'-gravity','center','-composite',
+       q(path.join(tmp,'s1.png'))].join(' '));
+
+  run(['convert',
+       q(path.join(tmp,'s1.png')),
+       q(path.join(tmp,'title.png')),'-gravity','north','-geometry',`+0+${titleY}`,'-composite',
+       q(path.join(tmp,'s2.png'))].join(' '));
+
+  run(['convert',
+       q(path.join(tmp,'s2.png')),
+       q(path.join(tmp,'body.png')),'-gravity','north','-geometry',`+0+${bodyY}`,'-composite',
+       q(outPath)].join(' '));
+
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+function drawCard(title, bodyLines, frameNo, outDir){
+  const out = path.join(outDir, `frame_${String(frameNo).padStart(4,'0')}.png`);
+  writeCardFrame(title, bodyLines, out, {});
+  return out;
+}
+
+// ---------- CLI sim: monospace, top-left ----------
+function writeTTYImage(text, outPath, opts={}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-'));
   const tf = path.join(tmp, 'text.txt');
   fs.writeFileSync(tf, text, 'utf8');
 
-  const W = Number(opts.width ?? 1280);
-  const H = Number(opts.height ?? 720);
-  const pt = Number(opts.point ?? 28);
-  const fg = String(opts.fg ?? '#e5e9f0');
-  const bg = String(opts.bg ?? '#0b0f14');
-  const font = String(opts.font ?? 'DejaVu-Sans-Mono');
+  const W = Number(opts.width ?? theme.width);
+  const H = Number(opts.height ?? theme.height);
 
-  const q = s => '"' + String(s).replace(/(["\$])/g,'\\$1') + '"';
-
-  // convert -size WxH xc:<bg> \( -background none -fill <fg> -font <font> -pointsize <pt> caption:@text.txt \) -gravity northwest -geometry +40+40 -composite out.png
-  const cmd = [
-    'convert',
-    '-size', `${W}x${H}`,
-    `xc:${bg}`,
-    '\\(',
-      '-background', 'none',
-      '-fill', q(fg),
-      '-font', q(font),
-      '-pointsize', String(pt),
-      q(`caption:@${tf}`),
-    '\\)',
-    '-gravity', 'northwest',
-    '-geometry', '+40+40',
-    '-composite',
+  run([
+    'convert','-size',`${W}x${H}`,`xc:${theme.bg}`,
+    '-fill',q(theme.fg),'-font',q(theme.mono),'-pointsize','28',
+    `caption:@${q(tf)}`,
+    '-gravity','northwest','-geometry','+40+40','-composite',
     q(outPath)
-  ].join(' ');
-  run(cmd);
+  ].join(' '));
+
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 
-function drawFrame(lines, frameNo, outDir){
+function drawTTY(lines, frameNo, outDir){
   const text = Array.isArray(lines) ? lines.join('\n') : String(lines);
   const out = path.join(outDir, `frame_${String(frameNo).padStart(4,'0')}.png`);
-  writeTextImage(text, out, {});
+  writeTTYImage(text, out, {});
   return out;
 }
 
-// slideSeconds = seconds each slide should be visible (e.g., 3)
-// fpsOut = output mp4 framerate (e.g., 30)
+// ---------- Compile (3s per slide by default) ----------
 function compile(outDir, outBase='trailer', slideSeconds=3, fpsOut=30) {
   const gif = path.join(outDir, `${outBase}.gif`);
   const mp4 = path.join(outDir, `${outBase}.mp4`);
@@ -140,6 +209,7 @@ function compile(outDir, outBase='trailer', slideSeconds=3, fpsOut=30) {
   return { gif, mp4 };
 }
 
+// ---------- Commands ----------
 function render(flags) {
   if (!isGitRepo()) fail('Not a git repository.');
   ensureTools();
@@ -149,29 +219,22 @@ function render(flags) {
   const a = analyze(from, to);
 
   let f = 0;
-  drawFrame([
+  drawCard(
     'RELEASE CINEMA',
-    '',
-    `Range: ${a.range.from} → ${a.range.to}`,
-    '',
-    `Commits: ${a.stats.commits}    Files changed: ${a.stats.files}`
-  ], ++f, outDir);
+    [`Range: ${a.range.from} → ${a.range.to}`, '', `Commits: ${a.stats.commits}    Files changed: ${a.stats.files}`],
+    ++f, outDir
+  );
 
   const topc = a.topCommits.length ? a.topCommits.map(c=>`• ${c.sha} — ${c.subject} (${c.author})`) : ['• No recent commits'];
-  drawFrame(['HIGHLIGHTS', '', ...topc.slice(0,5)], ++f, outDir);
+  drawCard('HIGHLIGHTS', topc.slice(0,5), ++f, outDir);
 
   const contrib = a.contributors.slice(0,5).map(c=>`• ${c.author} — ${c.count} commit(s)`);
-  drawFrame(['TOP CONTRIBUTORS', '', ...(contrib.length?contrib:['• —'])], ++f, outDir);
+  drawCard('TOP CONTRIBUTORS', (contrib.length?contrib:['• —']), ++f, outDir);
 
   const dirs = a.topDirs.map(d=>`• ${d.name} — ${d.count} file(s)`);
-  drawFrame(['CHANGED AREAS', '', ...(dirs.length?dirs:['• —'])], ++f, outDir);
+  drawCard('CHANGED AREAS', (dirs.length?dirs:['• —']), ++f, outDir);
 
-  drawFrame([
-    'THANKS FOR SHIPPING 🚀',
-    '',
-    'Made with Release Cinema',
-    new Date().toISOString()
-  ], ++f, outDir);
+  drawCard('THANKS FOR SHIPPING 🚀', ['Made with Release Cinema', new Date().toISOString()], ++f, outDir);
 
   const slideSeconds = Math.max(1, Number(flags['slide-seconds'] ?? 3));
   const fpsOut = Math.max(1, Number(flags['fps'] ?? 30));
@@ -187,13 +250,13 @@ function simulate(flags) {
   const outDir = osTmp;
   let f=0;
 
-  function draw(text){ drawFrame([text], ++f, outDir); }
+  function draw(text){ drawTTY([text], ++f, outDir); }
   function typeLine(prefix, text) {
     for (let i=1;i<=text.length;i+=2) draw(`${prefix}${text.slice(0,i)}_`);
     draw(`${prefix}${text}`);
   }
   function pause(lines, frames=8) {
-    for (let i=0;i<frames;i++) drawFrame(lines, ++f, outDir);
+    for (let i=0;i<frames;i++) drawTTY(lines, ++f, outDir);
   }
 
   typeLine('$ ', 'git tag -a vX.Y.Z -m "release: vX.Y.Z"');

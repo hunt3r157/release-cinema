@@ -21,6 +21,12 @@ function parseFlags(arr){
 const cmd = (args[0] && !args[0].startsWith('--')) ? args[0] : 'render';
 const flags = parseFlags(args);
 
+function numFlag(name, def){ const v=flags[name]; const n=Number(v); return Number.isFinite(n)&&n>0?n:def; }
+const gifDelay = numFlag('gif-delay', 12);
+const fps = numFlag('fps', 12);
+const holdFrames = numFlag('hold', 14);
+const typeStep = numFlag('type-step', 1);
+
 if (!['render','analyze','simulate'].includes(cmd)) { usage(); process.exit(1); }
 
 function run(cmd, opts={}) {
@@ -129,8 +135,8 @@ function drawFrame(lines, frameNo, outDir){
 function compile(outDir, outBase='trailer') {
   const gif = path.join(outDir, `${outBase}.gif`);
   const mp4 = path.join(outDir, `${outBase}.mp4`);
-  run(`convert -delay 6 -loop 0 '${outDir}/frame_*.png' '${gif}'`);
-  run(`ffmpeg -y -framerate 24 -pattern_type glob -i '${outDir}/frame_*.png' -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" -pix_fmt yuv420p '${mp4}'`);
+  run(`convert -delay ${gifDelay} -loop 0 '${outDir}/frame_*.png' '${gif}'`);
+  run(`ffmpeg -y -framerate ${fps} -pattern_type glob -i '${outDir}/frame_*.png' -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" -pix_fmt yuv420p '${mp4}'`);
   return { gif, mp4 };
 }
 
@@ -181,10 +187,10 @@ function simulate(flags) {
 
   function draw(text){ drawFrame([text], ++f, outDir); }
   function typeLine(prefix, text) {
-    for (let i=1;i<=text.length;i+=2) draw(`${prefix}${text.slice(0,i)}_`);
+    for (let i=1;i<=text.length;i+=typeStep) draw(`${prefix}${text.slice(0,i)}_`);
     draw(`${prefix}${text}`);
   }
-  function pause(lines, frames=8) {
+  function pause(lines, frames=holdFrames) {
     for (let i=0;i<frames;i++) drawFrame(lines, ++f, outDir);
   }
 
@@ -197,7 +203,7 @@ function simulate(flags) {
   pause(['# GitHub Actions', '• attach trailer … running']);
   pause(['# GitHub Actions', '✔ attach trailer … done']);
 
-  run(`convert -delay 6 -loop 0 '${outDir}/frame_*.png' '${out}'`);
+  run(`convert -delay ${gifDelay} -loop 0 '${outDir}/frame_*.png' '${out}'`);
   console.log(`✓ Wrote ${out}`);
 }
 

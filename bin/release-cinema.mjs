@@ -23,19 +23,6 @@ const flags = parseFlags(args);
 
 if (!['render','analyze','simulate'].includes(cmd)) { usage(); process.exit(1); }
 
-const theme = {
-  bg: '#0b0f14',
-  fg: '#e5e9f0',
-  accent: '#7aa2f7',
-  ok: '#9ece6a',
-  warn: '#e0af68',
-  err: '#f7768e',
-  font: 'DejaVu-Sans-Mono',
-  width: 1280,
-  height: 720,
-  point: 28
-};
-
 function run(cmd, opts={}) {
   return cp.execSync(cmd, { stdio: ['ignore','pipe','pipe'], encoding: 'utf8', ...opts }).trim();
 }
@@ -95,29 +82,31 @@ function analyze(from, to) {
   };
 }
 
+// Safely build a caption image via ImageMagick
 function writeTextImage(text, outPath, opts={}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-'));
   const tf = path.join(tmp, 'text.txt');
   fs.writeFileSync(tf, text, 'utf8');
-  const W = opts.width ?? 1280;
-  const H = opts.height ?? 720;
-  const pt = opts.point ?? 28;
-  const fg = opts.fg ?? '#e5e9f0';
-  const bg = opts.bg ?? '#0b0f14';
-  const font = opts.font ?? 'DejaVu-Sans-Mono';
+  const W = Number(opts.width ?? 1280);
+  const H = Number(opts.height ?? 720);
+  const pt = Number(opts.point ?? 28);
+  const fg = String(opts.fg ?? '#e5e9f0');
+  const bg = String(opts.bg ?? '#0b0f14');
+  const font = String(opts.font ?? 'DejaVu-Sans-Mono');
+  const q = s => '"' + String(s).replace(/(["\\$`])/g,'\\$1') + '"';
   const cmd = [
-    "convert",
-    "-size {W}x{H}",
-    "-background '{bg}'",
-    "-fill '{fg}'",
-    "-font '{font}'",
-    "-pointsize {pt}",
-    "caption:@'{tf}'",
-    "-gravity northwest",
-    "-compose over",
-    "-geometry +40+40",
-    "-composite",
-    "{outPath}'"
+    'convert',
+    `-size ${W}x${H}`,
+    `-background ${q(bg)}`,
+    `-fill ${q(fg)}`,
+    `-font ${q(font)}`,
+    `-pointsize ${pt}`,
+    `caption:@${q(tf)}`,
+    '-gravity', 'northwest',
+    '-compose', 'over',
+    '-geometry', '+40+40',
+    '-composite',
+    q(outPath)
   ].join(' ');
   run(cmd);
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -148,26 +137,26 @@ function render(flags) {
 
   let f = 0;
   drawFrame([
-    "RELEASE CINEMA",
-    "",
+    'RELEASE CINEMA',
+    '',
     `Range: ${a.range.from} → ${a.range.to}`,
-    "",
+    '',
     `Commits: ${a.stats.commits}    Files changed: ${a.stats.files}`
   ], ++f, outDir);
 
   const topc = a.topCommits.length ? a.topCommits.map(c=>`• ${c.sha} — ${c.subject} (${c.author})`) : ['• No recent commits'];
-  drawFrame(["HIGHLIGHTS", "", ...topc.slice(0,5)], ++f, outDir);
+  drawFrame(['HIGHLIGHTS', '', ...topc.slice(0,5)], ++f, outDir);
 
   const contrib = a.contributors.slice(0,5).map(c=>`• ${c.author} — ${c.count} commit(s)`);
-  drawFrame(["TOP CONTRIBUTORS", "", ...(contrib.length?contrib:["• —"])], ++f, outDir);
+  drawFrame(['TOP CONTRIBUTORS', '', ...(contrib.length?contrib:['• —'])], ++f, outDir);
 
   const dirs = a.topDirs.map(d=>`• ${d.name} — ${d.count} file(s)`);
-  drawFrame(["CHANGED AREAS", "", ...(dirs.length?dirs:["• —"])], ++f, outDir);
+  drawFrame(['CHANGED AREAS', '', ...(dirs.length?dirs:['• —'])], ++f, outDir);
 
   drawFrame([
-    "THANKS FOR SHIPPING 🚀",
-    "",
-    "Made with Release Cinema",
+    'THANKS FOR SHIPPING 🚀',
+    '',
+    'Made with Release Cinema',
     new Date().toISOString()
   ], ++f, outDir);
 
@@ -185,9 +174,7 @@ function simulate(flags) {
 
   function draw(text){ drawFrame([text], ++f, outDir); }
   function typeLine(prefix, text) {
-    for (let i=1;i<=text.length;i+=2) {
-      draw(`${prefix}${text.slice(0,i)}_`);
-    }
+    for (let i=1;i<=text.length;i+=2) draw(`${prefix}${text.slice(0,i)}_`);
     draw(`${prefix}${text}`);
   }
   function pause(lines, frames=8) {
@@ -216,7 +203,7 @@ Usage:
 `);
 }
 
-function fail(msg){ console.error(`✖ ${msg}`); process.exit(2); }
+function fail(msg){ console.error(\`✖ \${msg}\`); process.exit(2); }
 
 (async () => {
   try {

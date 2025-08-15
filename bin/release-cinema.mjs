@@ -203,7 +203,7 @@ Usage:
 `);
 }
 
-function fail(msg){ console.error(\`✖ \${msg}\`); process.exit(2); }
+function fail(msg){ console.error('✖ ' + msg); process.exit(2); }
 
 (async () => {
   try {

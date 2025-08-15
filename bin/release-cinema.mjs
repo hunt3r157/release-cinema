@@ -82,28 +82,35 @@ function analyze(from, to) {
   };
 }
 
-// Safely build a caption image via ImageMagick
+// Safely build a caption image via ImageMagick by compositing onto a base canvas
 function writeTextImage(text, outPath, opts={}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-'));
   const tf = path.join(tmp, 'text.txt');
   fs.writeFileSync(tf, text, 'utf8');
+
   const W = Number(opts.width ?? 1280);
   const H = Number(opts.height ?? 720);
   const pt = Number(opts.point ?? 28);
   const fg = String(opts.fg ?? '#e5e9f0');
   const bg = String(opts.bg ?? '#0b0f14');
   const font = String(opts.font ?? 'DejaVu-Sans-Mono');
-  const q = s => '"' + String(s).replace(/(["\\$`])/g,'\\$1') + '"';
+
+  // minimal quoting (no backticks in the regex to avoid escaping headaches)
+  const q = s => '"' + String(s).replace(/(["\\$])/g,'\\$1') + '"';
+
+  // convert -size WxH xc:<bg> \( -background none -fill <fg> -font <font> -pointsize <pt> caption:@text.txt \) -gravity northwest -geometry +40+40 -composite out.png
   const cmd = [
     'convert',
-    `-size ${W}x${H}`,
-    `-background ${q(bg)}`,
-    `-fill ${q(fg)}`,
-    `-font ${q(font)}`,
-    `-pointsize ${pt}`,
-    `caption:@${q(tf)}`,
+    '-size', `${W}x${H}`,
+    `xc:${bg}`,
+    '\\(',
+      '-background', 'none',
+      '-fill', q(fg),
+      '-font', q(font),
+      '-pointsize', String(pt),
+      q(`caption:@${tf}`),
+    '\\)',
     '-gravity', 'northwest',
-    '-compose', 'over',
     '-geometry', '+40+40',
     '-composite',
     q(outPath)

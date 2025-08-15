@@ -21,12 +21,6 @@ function parseFlags(arr){
 const cmd = (args[0] && !args[0].startsWith('--')) ? args[0] : 'render';
 const flags = parseFlags(args);
 
-function numFlag(name, def){ const v=flags[name]; const n=Number(v); return Number.isFinite(n)&&n>0?n:def; }
-const gifDelay = numFlag('gif-delay', 12);
-const fps = numFlag('fps', 12);
-const holdFrames = numFlag('hold', 14);
-const typeStep = numFlag('type-step', 1);
-
 if (!['render','analyze','simulate'].includes(cmd)) { usage(); process.exit(1); }
 
 function run(cmd, opts={}) {
@@ -101,8 +95,7 @@ function writeTextImage(text, outPath, opts={}) {
   const bg = String(opts.bg ?? '#0b0f14');
   const font = String(opts.font ?? 'DejaVu-Sans-Mono');
 
-  // minimal quoting (no backticks in the regex to avoid escaping headaches)
-  const q = s => '"' + String(s).replace(/(["\\$])/g,'\\$1') + '"';
+  const q = s => '"' + String(s).replace(/(["\$])/g,'\\$1') + '"';
 
   // convert -size WxH xc:<bg> \( -background none -fill <fg> -font <font> -pointsize <pt> caption:@text.txt \) -gravity northwest -geometry +40+40 -composite out.png
   const cmd = [
@@ -132,11 +125,18 @@ function drawFrame(lines, frameNo, outDir){
   return out;
 }
 
-function compile(outDir, outBase='trailer') {
+// slideSeconds = seconds each slide should be visible (e.g., 3)
+// fpsOut = output mp4 framerate (e.g., 30)
+function compile(outDir, outBase='trailer', slideSeconds=3, fpsOut=30) {
   const gif = path.join(outDir, `${outBase}.gif`);
   const mp4 = path.join(outDir, `${outBase}.mp4`);
+
+  const gifDelay = Math.max(1, Math.round(slideSeconds * 100)); // centiseconds
   run(`convert -delay ${gifDelay} -loop 0 '${outDir}/frame_*.png' '${gif}'`);
-  run(`ffmpeg -y -framerate ${fps} -pattern_type glob -i '${outDir}/frame_*.png' -vf "pad=ceil(iw/2)*2:ceil(ih/2)*2" -pix_fmt yuv420p '${mp4}'`);
+
+  const inRate = Number.isInteger(slideSeconds) ? `1/${slideSeconds}` : (1/slideSeconds).toFixed(6);
+  run(`ffmpeg -y -framerate ${inRate} -pattern_type glob -i '${outDir}/frame_*.png' -vf "fps=${fpsOut},pad=ceil(iw/2)*2:ceil(ih/2)*2" -r ${fpsOut} -pix_fmt yuv420p '${mp4}'`);
+
   return { gif, mp4 };
 }
 
@@ -173,7 +173,9 @@ function render(flags) {
     new Date().toISOString()
   ], ++f, outDir);
 
-  const { gif, mp4 } = compile(outDir, 'trailer');
+  const slideSeconds = Math.max(1, Number(flags['slide-seconds'] ?? 3));
+  const fpsOut = Math.max(1, Number(flags['fps'] ?? 30));
+  const { gif, mp4 } = compile(outDir, 'trailer', slideSeconds, fpsOut);
   console.log(`✓ Wrote ${gif}`);
   console.log(`✓ Wrote ${mp4}`);
 }
@@ -187,10 +189,10 @@ function simulate(flags) {
 
   function draw(text){ drawFrame([text], ++f, outDir); }
   function typeLine(prefix, text) {
-    for (let i=1;i<=text.length;i+=typeStep) draw(`${prefix}${text.slice(0,i)}_`);
+    for (let i=1;i<=text.length;i+=2) draw(`${prefix}${text.slice(0,i)}_`);
     draw(`${prefix}${text}`);
   }
-  function pause(lines, frames=holdFrames) {
+  function pause(lines, frames=8) {
     for (let i=0;i<frames;i++) drawFrame(lines, ++f, outDir);
   }
 
@@ -203,14 +205,14 @@ function simulate(flags) {
   pause(['# GitHub Actions', '• attach trailer … running']);
   pause(['# GitHub Actions', '✔ attach trailer … done']);
 
-  run(`convert -delay ${gifDelay} -loop 0 '${outDir}/frame_*.png' '${out}'`);
+  run(`convert -delay 12 -loop 0 '${outDir}/frame_*.png' '${out}'`);
   console.log(`✓ Wrote ${out}`);
 }
 
 function usage() {
   console.log(`Release Cinema
 Usage:
-  release-cinema render --auto|--from <ref> --to <ref> [--out-dir assets]
+  release-cinema render --auto|--from <ref> --to <ref> [--out-dir assets] [--slide-seconds 3] [--fps 30]
   release-cinema analyze --from <ref> --to <ref>
   release-cinema simulate [--out assets/cli_sim.gif]
 `);

@@ -1,0 +1,29 @@
+name: 'Release Cinema'
+description: 'Render a release trailer (GIF/MP4) and a CLI simulation GIF'
+inputs:
+  from:
+    description: 'Start ref (optional if auto)'
+    required: false
+  to:
+    description: 'End ref (default HEAD)'
+    required: false
+  auto:
+    description: 'Detect previous tag .. HEAD'
+    required: false
+    default: 'true'
+  out-dir:
+    description: 'Output directory for assets'
+    required: false
+    default: 'assets'
+runs:
+  using: 'composite'
+  steps:
+    - shell: bash
+      run: |
+        sudo apt-get update && sudo apt-get install -y imagemagick ffmpeg fonts-dejavu-core
+        if [ "${{ inputs.auto }}" = "true" ]; then
+          node bin/release-cinema.mjs render --auto --out-dir "${{ inputs.out-dir }}"
+        else
+          node bin/release-cinema.mjs render --from "${{ inputs.from }}" --to "${{ inputs.to || 'HEAD' }}" --out-dir "${{ inputs.out-dir }}"
+        fi
+        node bin/release-cinema.mjs simulate --out "${{ inputs.out-dir }}/cli_sim.gif"

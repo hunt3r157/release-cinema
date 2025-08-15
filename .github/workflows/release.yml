@@ -1,0 +1,33 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+jobs:
+  publish-and-cinema:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+      - name: Install render tools
+        run: sudo apt-get update && sudo apt-get install -y imagemagick ffmpeg fonts-dejavu-core
+      - name: Render trailer & CLI sim
+        run: |
+          node bin/release-cinema.mjs render --auto --out-dir assets
+          node bin/release-cinema.mjs simulate --out assets/cli_sim.gif
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public || true
+      - name: Attach to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            assets/trailer.gif
+            assets/trailer.mp4
+            assets/cli_sim.gif

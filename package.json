@@ -1,0 +1,39 @@
+{
+  "name": "release-cinema",
+  "version": "0.1.0",
+  "description": "Render a short trailer (GIF/MP4) for your releases + a CLI simulation of the release run. Zero-dep Node CLI + GitHub Action.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "release-cinema": "bin/release-cinema.mjs"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE",
+    ".github/actions/release-cinema/action.yml"
+  ],
+  "keywords": [
+    "release",
+    "gif",
+    "video",
+    "trailer",
+    "github-actions",
+    "ffmpeg",
+    "imagemagick"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/release-cinema.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/release-cinema/issues"
+  },
+  "homepage": "https://github.com/your-username/release-cinema#readme",
+  "scripts": {
+    "cinema": "node bin/release-cinema.mjs render --auto --out-dir assets"
+  }
+}

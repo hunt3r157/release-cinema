@@ -36,77 +36,44 @@ const theme = {
 function run(cmd, opts={}) {
   return cp.execSync(cmd, { stdio: ['ignore','pipe','pipe'], encoding: 'utf8', ...opts }).trim();
 }
-
 function ensureTools() {
   try { run('convert -version'); } catch { fail('ImageMagick (convert) not found. Install it.'); }
   try { run('ffmpeg -version'); } catch { fail('ffmpeg not found. Install it.'); }
 }
-
-function isGitRepo() {
-  try { run('git rev-parse --is-inside-work-tree'); return true; } catch { return false; }
-}
-
+function isGitRepo() { try { run('git rev-parse --is-inside-work-tree'); return true; } catch { return false; } }
 function resolveRange(flags) {
   if (flags.auto) {
-    let to = 'HEAD';
-    let from = '';
-    try {
-      const lastTag = run('git describe --tags --abbrev=0');
-      from = lastTag;
-    } catch {
-      from = run('git rev-list --max-parents=0 HEAD').split('\n').at(0);
-    }
+    let to = 'HEAD', from = '';
+    try { from = run('git describe --tags --abbrev=0'); }
+    catch { from = run('git rev-list --max-parents=0 HEAD').split('\n').at(0); }
     return { from, to };
   }
   if (!flags.from || !flags.to) fail('Provide --from and --to, or use --auto');
   return { from: flags.from, to: flags.to };
 }
-
 function analyze(from, to) {
   const fmt = '%h|%an|%ad|%s';
   const log = run(`git log --date=short --pretty=format:"${fmt}" ${from}..${to}`);
   const lines = log ? log.split('\n') : [];
-  const commits = lines.filter(Boolean).map(l => {
-    const [sha, author, date, subject] = l.split('|');
-    return { sha, author, date, subject };
-  });
-
+  const commits = lines.filter(Boolean).map(l => { const [sha, author, date, subject] = l.split('|'); return { sha, author, date, subject }; });
   const filesChanged = run(`git diff --name-only ${from}..${to}`).split('\n').filter(Boolean);
-  const topDirsMap = new Map();
-  filesChanged.forEach(f => {
-    const d = f.split('/')[0] || f;
-    topDirsMap.set(d, (topDirsMap.get(d)||0)+1);
-  });
+  const topDirsMap = new Map(); filesChanged.forEach(f => { const d = f.split('/')[0] || f; topDirsMap.set(d, (topDirsMap.get(d)||0)+1); });
   const topDirs = [...topDirsMap.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([name,count])=>({name,count}));
-
-  const byAuthor = new Map();
-  commits.forEach(c => byAuthor.set(c.author, (byAuthor.get(c.author)||0)+1));
+  const byAuthor = new Map(); commits.forEach(c => byAuthor.set(c.author, (byAuthor.get(c.author)||0)+1));
   const contributors = [...byAuthor.entries()].sort((a,b)=>b[1]-a[1]).map(([author,count])=>({author,count}));
-
-  return {
-    range: { from, to },
-    stats: { commits: commits.length, files: filesChanged.length, dirs: topDirs.length },
-    topCommits: commits.slice(0, 5),
-    contributors,
-    topDirs
-  };
+  return { range: { from, to }, stats: { commits: commits.length, files: filesChanged.length, dirs: topDirs.length }, topCommits: commits.slice(0,5), contributors, topDirs };
 }
-
-function q(s){ return '"' + String(s).replace(/(["\$])/g,'\\$1') + '"'; }
+function q(s){ return '"' + String(s).replace(/(["\\$`])/g,'\\$1') + '"'; }
 
 // ---------- Trailer: centered “card” frame ----------
 function writeCardFrame(title, bodyLines, outPath, opts={}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-'));
-  const tfTitle = path.join(tmp, 'title.txt');
-  const tfBody  = path.join(tmp, 'body.txt');
-  fs.writeFileSync(tfTitle, title, 'utf8');
-  fs.writeFileSync(tfBody,  bodyLines.join('\n'), 'utf8');
 
   const W = Number(opts.width ?? theme.width);
   const H = Number(opts.height ?? theme.height);
   const cardW = Math.round(W*0.78);
   const cardH = Math.round(H*0.56);
-  const bodyW = cardW - 140;              // inner width for text
+  const bodyW = cardW - 140;
   const titlePt = Number(opts.titlePt ?? 64);
   const bodyPt  = Number(opts.bodyPt  ?? 34);
 
@@ -114,54 +81,39 @@ function writeCardFrame(title, bodyLines, outPath, opts={}) {
   const titleY  = cardTop + 42;
   const bodyY   = cardTop + 120;
 
-  // Base
-  run(['convert','-size',`${W}x${H}`,`xc:${theme.bg}`,q(path.join(tmp,'base.png'))].join(' '));
+  const titleText = String(title);
+  const bodyText  = Array.isArray(bodyLines) ? bodyLines.join("\\n") : String(bodyLines);
 
-  // Card with subtle border
+  // base
+  const base = path.join(tmp,'base.png');
+  run(['convert','-size',`${W}x${H}`,`xc:${theme.bg}`,q(base)].join(' '));
+
+  // card with subtle border
+  const card = path.join(tmp,'card.png');
   const draw1 = `roundrectangle 0,0 ${cardW-1},${cardH-1} 36,36`;
   const draw2 = `roundrectangle 1,1 ${cardW-2},${cardH-2} 36,36`;
-  run([
-    'convert','-size',`${cardW}x${cardH}`,'xc:none',
-    '-fill', q('rgba(255,255,255,0.06)'), '-draw', q(draw1),
-    '-stroke', q('#7aa2f744'), '-strokewidth','2', '-draw', q(draw2),
-    q(path.join(tmp,'card.png'))
-  ].join(' '));
+  run(['convert','-size',`${cardW}x${cardH}`,'xc:none','-fill',q('rgba(255,255,255,0.06)'),
+       '-draw',q(draw1),'-stroke',q('#7aa2f744'),'-strokewidth','2','-draw',q(draw2),q(card)].join(' '));
 
-  // Title (single-line label)
-  run([
-    'convert','-background','none','-fill',q(theme.accent),'-font',q(theme.sans),
-    '-pointsize', String(titlePt), '-size', `${bodyW}x`,
-    `caption:@${q(tfTitle)}`,
-    q(path.join(tmp,'title.png'))
-  ].join(' '));
+  // title (inline caption)
+  const titlePng = path.join(tmp,'title.png');
+  run(['convert','-background','none','-fill',q(theme.accent),'-font',q(theme.sans),
+       '-pointsize',String(titlePt),'-size',`${bodyW}x`, q('caption:' + titleText), q(titlePng)].join(' '));
 
-  // Body (wrapped caption)
-  run([
-    'convert','-background','none','-fill',q(theme.fg),'-font',q(theme.sans),
-    '-pointsize', String(bodyPt), '-size', `${bodyW}x`,
-    `caption:@${q(tfBody)}`,
-    q(path.join(tmp,'body.png'))
-  ].join(' '));
+  // body (inline caption)
+  const bodyPng = path.join(tmp,'body.png');
+  run(['convert','-background','none','-fill',q(theme.fg),'-font',q(theme.sans),
+       '-pointsize',String(bodyPt),'-size',`${bodyW}x`, q('caption:' + bodyText), q(bodyPng)].join(' '));
 
-  // Compose: base + card (center) + title (absolute from top) + body (absolute from top)
-  run(['convert',
-       q(path.join(tmp,'base.png')),
-       q(path.join(tmp,'card.png')),'-gravity','center','-composite',
-       q(path.join(tmp,'s1.png'))].join(' '));
-
-  run(['convert',
-       q(path.join(tmp,'s1.png')),
-       q(path.join(tmp,'title.png')),'-gravity','north','-geometry',`+0+${titleY}`,'-composite',
-       q(path.join(tmp,'s2.png'))].join(' '));
-
-  run(['convert',
-       q(path.join(tmp,'s2.png')),
-       q(path.join(tmp,'body.png')),'-gravity','north','-geometry',`+0+${bodyY}`,'-composite',
-       q(outPath)].join(' '));
+  // compose: base + card(center) + title + body
+  const s1 = path.join(tmp,'s1.png');
+  run(['convert', q(base), q(card), '-gravity','center','-composite', q(s1)].join(' '));
+  const s2 = path.join(tmp,'s2.png');
+  run(['convert', q(s1), q(titlePng), '-gravity','north','-geometry',`+0+${titleY}`, '-composite', q(s2)].join(' '));
+  run(['convert', q(s2), q(bodyPng),  '-gravity','north','-geometry',`+0+${bodyY}`,  '-composite', q(outPath)].join(' '));
 
   fs.rmSync(tmp, { recursive: true, force: true });
 }
-
 function drawCard(title, bodyLines, frameNo, outDir){
   const out = path.join(outDir, `frame_${String(frameNo).padStart(4,'0')}.png`);
   writeCardFrame(title, bodyLines, out, {});
@@ -170,24 +122,13 @@ function drawCard(title, bodyLines, frameNo, outDir){
 
 // ---------- CLI sim: monospace, top-left ----------
 function writeTTYImage(text, outPath, opts={}) {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-'));
-  const tf = path.join(tmp, 'text.txt');
-  fs.writeFileSync(tf, text, 'utf8');
-
   const W = Number(opts.width ?? theme.width);
   const H = Number(opts.height ?? theme.height);
-
-  run([
-    'convert','-size',`${W}x${H}`,`xc:${theme.bg}`,
-    '-fill',q(theme.fg),'-font',q(theme.mono),'-pointsize','28',
-    `caption:@${q(tf)}`,
-    '-gravity','northwest','-geometry','+40+40','-composite',
-    q(outPath)
-  ].join(' '));
-
-  fs.rmSync(tmp, { recursive: true, force: true });
+  const body = String(text);
+  run(['convert','-size',`${W}x${H}`,`xc:${theme.bg}`,
+       '-fill',q(theme.fg),'-font',q(theme.mono),'-pointsize','28',
+       q('caption:' + body),'-gravity','northwest','-geometry','+40+40','-composite', q(outPath)].join(' '));
 }
-
 function drawTTY(lines, frameNo, outDir){
   const text = Array.isArray(lines) ? lines.join('\n') : String(lines);
   const out = path.join(outDir, `frame_${String(frameNo).padStart(4,'0')}.png`);
@@ -219,11 +160,9 @@ function render(flags) {
   const a = analyze(from, to);
 
   let f = 0;
-  drawCard(
-    'RELEASE CINEMA',
-    [`Range: ${a.range.from} → ${a.range.to}`, '', `Commits: ${a.stats.commits}    Files changed: ${a.stats.files}`],
-    ++f, outDir
-  );
+  drawCard('RELEASE CINEMA',
+           [`Range: ${a.range.from} → ${a.range.to}`,'',`Commits: ${a.stats.commits}    Files changed: ${a.stats.files}`],
+           ++f, outDir);
 
   const topc = a.topCommits.length ? a.topCommits.map(c=>`• ${c.sha} — ${c.subject} (${c.author})`) : ['• No recent commits'];
   drawCard('HIGHLIGHTS', topc.slice(0,5), ++f, outDir);
@@ -251,13 +190,8 @@ function simulate(flags) {
   let f=0;
 
   function draw(text){ drawTTY([text], ++f, outDir); }
-  function typeLine(prefix, text) {
-    for (let i=1;i<=text.length;i+=2) draw(`${prefix}${text.slice(0,i)}_`);
-    draw(`${prefix}${text}`);
-  }
-  function pause(lines, frames=8) {
-    for (let i=0;i<frames;i++) drawTTY(lines, ++f, outDir);
-  }
+  function typeLine(prefix, text) { for (let i=1;i<=text.length;i+=2) draw(`${prefix}${text.slice(0,i)}_`); draw(`${prefix}${text}`); }
+  function pause(lines, frames=8) { for (let i=0;i<frames;i++) drawTTY(lines, ++f, outDir); }
 
   typeLine('$ ', 'git tag -a vX.Y.Z -m "release: vX.Y.Z"');
   typeLine('$ ', 'git push origin vX.Y.Z');
@@ -280,7 +214,6 @@ Usage:
   release-cinema simulate [--out assets/cli_sim.gif]
 `);
 }
-
 function fail(msg){ console.error('✖ ' + msg); process.exit(2); }
 
 (async () => {
@@ -289,13 +222,7 @@ function fail(msg){ console.error('✖ ' + msg); process.exit(2); }
       if (!isGitRepo()) fail('Not a git repository.');
       const { from, to } = resolveRange(flags);
       console.log(JSON.stringify(analyze(from, to), null, 2));
-    } else if (cmd === 'render') {
-      render(flags);
-    } else if (cmd === 'simulate') {
-      simulate(flags);
-    }
-  } catch (e) {
-    console.error(e.message || String(e));
-    process.exit(2);
-  }
+    } else if (cmd === 'render') { render(flags); }
+    else if (cmd === 'simulate') { simulate(flags); }
+  } catch (e) { console.error(e.message || String(e)); process.exit(2); }
 })();

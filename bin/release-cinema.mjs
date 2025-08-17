@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Release Cinema — render release trailers + CLI simulation + multi-repo (Node >= 18)
+// Release Cinema — render release trailers + CLI simulation + multi-repo + newcomer shout-outs (Node >= 18)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -194,17 +194,51 @@ function resolveRange(flags) {
   if (!flags.from || !flags.to) fail('Provide --from and --to, or use --auto');
   return { from: flags.from, to: flags.to };
 }
+
+// Enhanced commit analysis: includes emails + first-time contributors
 function analyze(from, to) {
-  const fmt = '%h|%an|%ad|%s';
+  const fmt = '%h|%an|%ae|%ad|%s';
   const log = run(`git log --date=short --pretty=format:"${fmt}" ${from}..${to}`);
   const lines = log ? log.split('\n') : [];
-  const commits = lines.filter(Boolean).map(l => { const [sha, author, date, subject] = l.split('|'); return { sha, author, date, subject }; });
+  const commits = lines.filter(Boolean).map(l => {
+    const [sha, author, email, date, subject] = l.split('|');
+    return { sha, author, email, date, subject };
+  });
+
   const filesChanged = run(`git diff --name-only ${from}..${to}`).split('\n').filter(Boolean);
   const topDirsMap = new Map(); filesChanged.forEach(f => { const d = f.split('/')[0] || f; topDirsMap.set(d, (topDirsMap.get(d)||0)+1); });
   const topDirs = [...topDirsMap.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([name,count])=>({name,count}));
-  const byAuthor = new Map(); commits.forEach(c => byAuthor.set(c.author, (byAuthor.get(c.author)||0)+1));
-  const contributors = [...byAuthor.entries()].sort((a,b)=>b[1]-a[1]).map(([author,count])=>({author,count}));
-  return { range: { from, to }, stats: { commits: commits.length, files: filesChanged.length, dirs: topDirs.length }, topCommits: commits.slice(0,5), contributors, topDirs };
+
+  // Aggregate contributors by email (falls back to author when email missing)
+  const contribMap = new Map();
+  for (const c of commits) {
+    const key = (c.email && c.email.toLowerCase()) || c.author;
+    if (!contribMap.has(key)) contribMap.set(key, { author: c.author, email: c.email || null, count: 0 });
+    contribMap.get(key).count++;
+  }
+  const contributors = [...contribMap.values()].sort((a,b)=>b.count-a.count);
+
+  // New contributors: those with commits in range but no commits before 'from'
+  let newContributors = [];
+  try {
+    const fromTs = Number(run(`git show -s --format=%ct ${from}`)) || 0;
+    const beforeEmails = new Set(
+      run(`git log --all --pretty=format:%ae --until=${fromTs-1}`)
+        .split('\n').map(s=>s.trim().toLowerCase()).filter(Boolean)
+    );
+    newContributors = contributors.filter(c => c.email && !beforeEmails.has(c.email.toLowerCase()));
+  } catch {
+    newContributors = [];
+  }
+
+  return {
+    range: { from, to },
+    stats: { commits: commits.length, files: filesChanged.length, dirs: topDirs.length },
+    topCommits: commits.slice(0,5).map(({sha,author,date,subject})=>({sha,author,date,subject})),
+    contributors,
+    newContributors,
+    topDirs
+  };
 }
 
 // -------- render: centered card with auto-fit + branding --------
@@ -351,17 +385,33 @@ function resolveRangeForRepo(repo, want) {
   return { from: want.from, to: want.to };
 }
 function analyzeRepo(repo, from, to) {
-  const fmt = '%h|%an|%ad|%s';
+  const fmt = '%h|%an|%ae|%ad|%s';
   const log = runGit(repo, `log --date=short --pretty=format:"${fmt}" ${from}..${to}`);
   const lines = log ? log.split('\n') : [];
-  const commits = lines.filter(Boolean).map(l => { const [sha, author, date, subject] = l.split('|'); return { sha, author, date, subject }; });
+  const commits = lines.filter(Boolean).map(l => { const [sha, author, email, date, subject] = l.split('|'); return { sha, author, email, date, subject }; });
   const filesChanged = runGit(repo, `diff --name-only ${from}..${to}`).split('\n').filter(Boolean);
   const topDirsMap = new Map(); filesChanged.forEach(f => { const d = f.split('/')[0] || f; topDirsMap.set(d, (topDirsMap.get(d)||0)+1); });
   const topDirs = [...topDirsMap.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([name,count])=>({name,count}));
-  const byAuthor = new Map(); commits.forEach(c => byAuthor.set(c.author, (byAuthor.get(c.author)||0)+1));
-  const contributors = [...byAuthor.entries()].sort((a,b)=>b[1]-a[1]).map(([author,count])=>({author,count}));
+  const contribMap = new Map();
+  for (const c of commits) {
+    const key = (c.email && c.email.toLowerCase()) || c.author;
+    if (!contribMap.has(key)) contribMap.set(key, { author: c.author, email: c.email || null, count: 0 });
+    contribMap.get(key).count++;
+  }
+  const contributors = [...contribMap.values()].sort((a,b)=>b.count-a.count);
+
+  let newContributors = [];
+  try {
+    const fromTs = Number(runGit(repo, `show -s --format=%ct ${from}`)) || 0;
+    const beforeEmails = new Set(
+      runGit(repo, `log --all --pretty=format:%ae --until=${fromTs-1}`)
+        .split('\n').map(s=>s.trim().toLowerCase()).filter(Boolean)
+    );
+    newContributors = contributors.filter(c => c.email && !beforeEmails.has(c.email.toLowerCase()));
+  } catch { newContributors = []; }
+
   const repoName = path.basename(path.resolve(repo));
-  return { repo: repoName, range: { from, to }, stats: { commits: commits.length, files: filesChanged.length, dirs: topDirs.length }, topCommits: commits.slice(0,5), contributors, topDirs };
+  return { repo: repoName, range: { from, to }, stats: { commits: commits.length, files: filesChanged.length, dirs: topDirs.length }, topCommits: commits.slice(0,5).map(({sha,author,date,subject})=>({sha,author,date,subject})), contributors, newContributors, topDirs };
 }
 
 // -------- commands --------
@@ -381,8 +431,11 @@ function render(flags) {
   const topc = a.topCommits.length ? a.topCommits.map(c=>`• ${c.sha} — ${c.subject} (${c.author})`) : ['• No recent commits'];
   drawCard('HIGHLIGHTS', topc.slice(0,5), ++f, outDir);
 
-  const contrib = a.contributors.slice(0,5).map(c=>`• ${c.author} — ${c.count} commit(s)`);
+  const contrib = a.contributors.slice(0,5).map(c=>`• ${c.author} — ${c.count} commit(s)${a.newContributors.find(n=>n.author===c.author)?' ✨':''}`);
   drawCard('TOP CONTRIBUTORS', (contrib.length?contrib:['• —']), ++f, outDir);
+
+  const newcomers = a.newContributors.slice(0,8).map(c=>`✨ ${c.author} — ${c.count} commit(s)`);
+  drawCard('NEW CONTRIBUTORS', (newcomers.length?newcomers:['• —']), ++f, outDir);
 
   const dirs = a.topDirs.map(d=>`• ${d.name} — ${d.count} file(s)`);
   drawCard('CHANGED AREAS', (dirs.length?dirs:['• —']), ++f, outDir);
@@ -425,11 +478,16 @@ function multi(flags) {
     const range = resolveRangeForRepo(repoAbs, flags.auto ? { auto:true } : { from: flags.from, to: flags.to });
     const a = analyzeRepo(repoAbs, range.from, range.to);
 
-    // slides per repo
     drawCard(`${repoName}`, [`Range: ${a.range.from} → ${a.range.to}`, '', `Commits: ${a.stats.commits}    Files changed: ${a.stats.files}`], ++f, outDir);
 
     const topc = a.topCommits.length ? a.topCommits.map(c=>`• ${c.sha} — ${c.subject} (${c.author})`) : ['• No recent commits'];
     drawCard(`HIGHLIGHTS — ${repoName}`, topc.slice(0,5), ++f, outDir);
+
+    const contrib = a.contributors.slice(0,5).map(c=>`• ${c.author} — ${c.count} commit(s)${a.newContributors.find(n=>n.author===c.author)?' ✨':''}`);
+    drawCard(`TOP CONTRIBUTORS — ${repoName}`, (contrib.length?contrib:['• —']), ++f, outDir);
+
+    const newcomers = a.newContributors.slice(0,8).map(c=>`✨ ${c.author} — ${c.count} commit(s)`);
+    drawCard(`NEW CONTRIBUTORS — ${repoName}`, (newcomers.length?newcomers:['• —']), ++f, outDir);
 
     const dirs = a.topDirs.map(d=>`• ${d.name} — ${d.count} file(s)`);
     drawCard(`CHANGED AREAS — ${repoName}`, (dirs.length?dirs:['• —']), ++f, outDir);

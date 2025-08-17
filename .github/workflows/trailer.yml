@@ -14,14 +14,26 @@ permissions:
 jobs:
   trailer:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linkedin-dark
+            preset: linkedin
+            theme: default
+          - name: twitter-neon
+            preset: twitter
+            theme: neon
+          - name: instagram-light
+            preset: instagram
+            theme: light
+
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
 
       - uses: actions/setup-node@v4
-        with:
-          node-version: 20
+        with: { node-version: 20 }
 
       - name: Install system deps (ImageMagick, ffmpeg, fonts)
         run: |
@@ -30,59 +42,86 @@ jobs:
           convert -version
           ffmpeg -version
 
-      # --- Render trailer for PRs: base..head exact range ---
-      - name: Render trailer (PR)
+      # --- Render trailer for PRs: exact base..head range ---
+      - name: Render trailer (PR) — ${{ matrix.name }}
         if: ${{ github.event_name == 'pull_request' }}
         env:
           FROM_SHA: ${{ github.event.pull_request.base.sha }}
           TO_SHA:   ${{ github.event.pull_request.head.sha }}
         run: |
+          mkdir -p assets/${{ matrix.name }}
           node bin/release-cinema.mjs render \
             --from "$FROM_SHA" --to "$TO_SHA" \
-            --preset linkedin \
-            --out-dir assets
+            --preset "${{ matrix.preset }}" \
+            --theme "${{ matrix.theme }}" \
+            --brand ./brand/logo.png \
+            --brand-opacity 0.9 \
+            --brand-geom +32+32 \
+            --watermark "${GITHUB_REPOSITORY}" \
+            --watermark-pt 20 \
+            --watermark-geom +32+32 \
+            --out-dir assets/${{ matrix.name }}
 
-      # --- Render trailer on tag pushes (auto: last tag..this tag/HEAD) ---
-      - name: Render trailer (tag)
+          # normalize filenames to include variant name
+          mv assets/${{ matrix.name }}/trailer.gif assets/trailer-${{ matrix.name }}.gif
+          mv assets/${{ matrix.name }}/trailer.mp4 assets/trailer-${{ matrix.name }}.mp4
+
+      # --- Render trailer on tag pushes (auto range) ---
+      - name: Render trailer (tag) — ${{ matrix.name }}
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         run: |
+          mkdir -p assets/${{ matrix.name }}
           node bin/release-cinema.mjs render \
             --auto \
-            --preset linkedin \
-            --out-dir assets
+            --preset "${{ matrix.preset }}" \
+            --theme "${{ matrix.theme }}" \
+            --brand ./brand/logo.png \
+            --brand-opacity 0.9 \
+            --brand-geom +32+32 \
+            --watermark "${GITHUB_REPOSITORY}" \
+            --watermark-pt 20 \
+            --watermark-geom +32+32 \
+            --out-dir assets/${{ matrix.name }}
 
-      - name: Upload artifacts
+          mv assets/${{ matrix.name }}/trailer.gif assets/trailer-${{ matrix.name }}.gif
+          mv assets/${{ matrix.name }}/trailer.mp4 assets/trailer-${{ matrix.name }}.mp4
+
+      - name: Upload artifacts (all variants)
         uses: actions/upload-artifact@v4
         with:
-          name: trailer
+          name: trailer-bundle
           path: |
-            assets/trailer.gif
-            assets/trailer.mp4
+            assets/trailer-*.gif
+            assets/trailer-*.mp4
 
-      # Nice: embed the GIF in the workflow summary so reviewers can watch inline
-      - name: Add Action Summary preview
+      # Inline previews in the run Summary (one per job)
+      - name: Add Action Summary preview (this variant)
         if: always()
         run: |
-          echo "## 🎬 Release Cinema Preview" >> "$GITHUB_STEP_SUMMARY"
+          echo "### 🎬 ${{ matrix.name }}" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo '<img alt="trailer" src="data:image/gif;base64,' >> "$GITHUB_STEP_SUMMARY"
-          base64 -w 0 assets/trailer.gif >> "$GITHUB_STEP_SUMMARY" || true
+          echo '<img alt="${{ matrix.name }}" src="data:image/gif;base64,' >> "$GITHUB_STEP_SUMMARY"
+          base64 -w 0 assets/trailer-${{ matrix.name }}.gif >> "$GITHUB_STEP_SUMMARY" || true
           echo '"/>' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
 
-      # PR comment: link to this run (artifacts + inline preview in Summary)
+      # PR comment with link to this run (artifacts + inline previews)
       - name: Comment on PR with links
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.name == 'linkedin-dark' }}
         uses: actions/github-script@v7
         with:
           script: |
             const runId = process.env.GITHUB_RUN_ID;
             const url = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${runId}`;
             const body = [
-              '🎬 **Release Cinema preview**',
+              '🎬 **Release Cinema previews**',
               '',
-              `• **GIF/MP4 artifacts & inline preview:** ${url}`,
+              `• Artifacts & inline previews (Summary): ${url}`,
               '',
-              '_Open the run → Summary tab for the embedded GIF._'
+              '- Variants:',
+              '  - linkedin-dark (default)',
+              '  - twitter-neon',
+              '  - instagram-light',
             ].join('\n');
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -91,11 +130,11 @@ jobs:
               body
             });
 
-      # Attach media to the GitHub Release for tag builds
-      - name: Attach to Release
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+      # Attach all variants to the Release (tag builds)
+      - name: Attach to Release (all variants)
+        if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.name == 'linkedin-dark' }}
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            assets/trailer.gif
-            assets/trailer.mp4
+            assets/trailer-*.gif
+            assets/trailer-*.mp4

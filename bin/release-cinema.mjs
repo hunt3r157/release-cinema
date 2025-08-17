@@ -181,13 +181,11 @@ function resolveRange(flags) {
         return { from: prev, to: headTag };
       }
     } catch {}
-
     // Otherwise: last tag -> HEAD
     try {
       const last = run('git describe --tags --abbrev=0');
       return { from: last, to: 'HEAD' };
     } catch {}
-
     // No tags yet: first commit -> HEAD
     const first = run('git rev-list --max-parents=0 HEAD').split('\n')[0];
     return { from: first, to: 'HEAD' };
@@ -195,6 +193,7 @@ function resolveRange(flags) {
   if (!flags.from || !flags.to) fail('Provide --from and --to, or use --auto');
   return { from: flags.from, to: flags.to };
 }
+
 
 }
 function analyze(from, to) {

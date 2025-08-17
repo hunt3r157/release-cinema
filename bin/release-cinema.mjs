@@ -17,7 +17,6 @@ function parseFlags(argv){
     const a = argv[i];
     if (!a.startsWith('--')) continue;
 
-    // --key=value (repeatable becomes array)
     const eq = a.indexOf('=');
     if (eq > 2) {
       const k = a.slice(2, eq);
@@ -27,7 +26,6 @@ function parseFlags(argv){
       continue;
     }
 
-    // --key value  OR  --flag
     const k = a.slice(2);
     const next = argv[i + 1];
     if (next && !next.startsWith('--')) { out[k] = next; i++; }
@@ -63,10 +61,7 @@ function setPath(obj, pathStr, val){
 }
 function tryJson(v){ try { return JSON.parse(v); } catch { return v; } }
 function readTheme(flags){
-  // start with defaults
   let theme = JSON.parse(JSON.stringify(DEFAULT_THEME));
-
-  // optional theme file or name
   if (flags.theme) {
     let t = String(flags.theme);
     let themePath = t;
@@ -77,20 +72,61 @@ function readTheme(flags){
     if (fs.existsSync(themePath)) {
       const override = JSON.parse(fs.readFileSync(themePath,'utf8'));
       theme = { ...theme, ...override };
-      if (override.card)      theme.card      = { ...theme.card,      ...override.card };
-      if (override.spacing)   theme.spacing   = { ...theme.spacing,   ...override.spacing };
-      if (override.typography)theme.typography= { ...theme.typography,...override.typography };
+      if (override.card)       theme.card       = { ...theme.card,       ...override.card };
+      if (override.spacing)    theme.spacing    = { ...theme.spacing,    ...override.spacing };
+      if (override.typography) theme.typography = { ...theme.typography, ...override.typography };
     }
   }
-
-  // --set key=val (repeatable)
   for (const kv of coerceArray(flags.set)) {
     const [k, raw=''] = String(kv).split('=');
     setPath(theme, k, tryJson(raw));
   }
   return theme;
 }
-const theme = readTheme(flags);
+let theme = readTheme(flags);
+
+// -------- social presets (size + scale) --------
+const PRESETS = {
+  twitter:  { w:1280, h:720,  scale:1.00 },
+  linkedin: { w:1200, h:720,  scale:0.94 },
+  instagram:{ w:1080, h:1080, scale:0.90 },
+  shorts:   { w:1080, h:1920, scale:0.90 }
+};
+function applyPreset(t, name){
+  const p = PRESETS[name]; if (!p) return t;
+  const out = JSON.parse(JSON.stringify(t));
+  out.width = p.w; out.height = p.h;
+  const s = p.scale ?? 1;
+  const scale = (n) => Math.max(1, Math.round(Number(n) * s));
+  out.spacing = out.spacing || {};
+  out.spacing.margin       = scale(out.spacing.margin ?? 64);
+  out.spacing.padTop       = scale(out.spacing.padTop ?? 42);
+  out.spacing.gapTitleBody = scale(out.spacing.gapTitleBody ?? 40);
+  out.spacing.padBottom    = scale(out.spacing.padBottom ?? 48);
+  out.typography = out.typography || {};
+  out.typography.titlePt   = scale(out.typography.titlePt ?? 64);
+  out.typography.bodyPt    = scale(out.typography.bodyPt ?? 34);
+  out.card = out.card || {};
+  out.card.radius          = scale(out.card.radius ?? 36);
+  return out;
+}
+if (flags.preset) theme = applyPreset(theme, String(flags.preset));
+
+// -------- branding / watermark (Phase 1) --------
+const BRAND = {
+  logo: flags.brand ? String(flags.brand) : null,
+  gravity: String(flags['brand-gravity'] ?? 'southeast'),
+  geom: String(flags['brand-geom'] ?? '+40+40'),
+  opacity: Math.max(0, Math.min(1, Number(flags['brand-opacity'] ?? 0.85))),
+  maxWidth: Number(flags['brand-maxw'] ?? 160)
+};
+const WATERMARK = {
+  text: flags.watermark ? String(flags.watermark) : null,
+  gravity: String(flags['watermark-gravity'] ?? BRAND.gravity),
+  geom: String(flags['watermark-geom'] ?? BRAND.geom),
+  pt: Number(flags['watermark-pt'] ?? 22),
+  fill: String(flags['watermark-fill'] ?? theme.fg)
+};
 
 // -------- utils --------
 function run(cmd) {
@@ -103,6 +139,36 @@ function ensureTools() {
 function isGitRepo() { try { run('git rev-parse --is-inside-work-tree'); return true; } catch { return false; } }
 function q(s){ return '"' + String(s).replace(/(["\\$`])/g,'\\$1') + '"'; }
 function fail(msg){ console.error('✖ ' + msg); process.exit(2); }
+
+function applyBranding(outPath){
+  if (!BRAND.logo && !WATERMARK.text) return;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-'));
+  try {
+    let base = outPath;
+
+    if (BRAND.logo && fs.existsSync(BRAND.logo)) {
+      const brandPng = path.join(tmp, 'brand.png');
+      run(['convert', q(BRAND.logo), '-alpha','on', '-resize', `${BRAND.maxWidth}x`,
+           '-channel','A','-evaluate','set', `${Math.round(BRAND.opacity*100)}%`,
+           q(brandPng)].join(' '));
+      const o = path.join(tmp, 'o1.png');
+      run(['convert', q(base), q(brandPng), '-gravity', BRAND.gravity, '-geometry', BRAND.geom,
+           '-composite', q(o)].join(' '));
+      fs.copyFileSync(o, outPath);
+      base = outPath;
+    }
+
+    if (WATERMARK.text) {
+      const wm = path.join(tmp, 'wm.png');
+      run(['convert','-background','none','-fill', q(WATERMARK.fill), '-font', q(theme.sans),
+           '-pointsize', String(WATERMARK.pt), q('caption:' + WATERMARK.text), q(wm)].join(' '));
+      const o2 = path.join(tmp, 'o2.png');
+      run(['convert', q(base), q(wm), '-gravity', WATERMARK.gravity, '-geometry', WATERMARK.geom,
+           '-composite', q(o2)].join(' '));
+      fs.copyFileSync(o2, outPath);
+    }
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
 
 // -------- git analyze --------
 function resolveRange(flags) {
@@ -128,7 +194,7 @@ function analyze(from, to) {
   return { range: { from, to }, stats: { commits: commits.length, files: filesChanged.length, dirs: topDirs.length }, topCommits: commits.slice(0,5), contributors, topDirs };
 }
 
-// -------- render: centered card with auto-fit --------
+// -------- render: centered card with auto-fit + branding --------
 function writeCardFrame(title, bodyLines, outPath, opts = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-'));
 
@@ -200,6 +266,9 @@ function writeCardFrame(title, bodyLines, outPath, opts = {}) {
   run(['convert', q(s1), q(titlePng), '-gravity','north','-geometry',`+0+${titleY}`, '-composite', q(s2)].join(' '));
   run(['convert', q(s2), q(bodyPng),  '-gravity','north','-geometry',`+0+${bodyY}`,  '-composite', q(outPath)].join(' '));
 
+  // Branding/text watermark (optional)
+  applyBranding(outPath);
+
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 function drawCard(title, bodyLines, frameNo, outDir){
@@ -223,6 +292,10 @@ function writeTTYImage(text, outPath, opts={}) {
        '-pointsize','28', q('caption:' + body), q(cap)].join(' '));
 
   run(['convert', q(base), q(cap), '-gravity','northwest','-geometry','+40+40','-composite', q(outPath)].join(' '));
+
+  // Branding on CLI frames too
+  applyBranding(outPath);
+
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 function drawTTY(lines, frameNo, outDir){
@@ -303,7 +376,16 @@ function simulate(flags) {
 function usage() {
   console.log(`Release Cinema
 Usage:
-  release-cinema render --auto|--from <ref> --to <ref> [--out-dir assets] [--slide-seconds 3] [--fps 30] [--theme default|path] [--set key=val ...]
+  release-cinema render --auto|--from <ref> --to <ref>
+    [--out-dir assets] [--slide-seconds 3] [--fps 30]
+    [--theme default|light|neon|mono|enterprise|path/to.json]
+    [--set key=val ...]
+    [--preset twitter|linkedin|instagram|shorts]
+    [--brand ./logo.png] [--brand-opacity 0.85]
+    [--brand-gravity southeast] [--brand-geom +40+40]
+    [--watermark "Your Org"] [--watermark-pt 22]
+    [--watermark-gravity southeast] [--watermark-geom +40+40]
+
   release-cinema analyze --from <ref> --to <ref>
   release-cinema simulate [--out assets/cli_sim.gif]
 `);

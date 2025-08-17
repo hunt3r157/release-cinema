@@ -66,54 +66,109 @@ function analyze(from, to) {
 function q(s){ return '"' + String(s).replace(/(["\\$`])/g,'\\$1') + '"'; }
 
 // ---------- Trailer: centered “card” frame ----------
-function writeCardFrame(title, bodyLines, outPath, opts={}) {
+// ---------- Trailer: centered “card” frame (auto-fit) ----------
+function writeCardFrame(title, bodyLines, outPath, opts = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-'));
 
   const W = Number(opts.width ?? theme.width);
   const H = Number(opts.height ?? theme.height);
-  const cardW = Math.round(W*0.78);
-  const cardH = Math.round(H*0.56);
-  const bodyW = cardW - 140;
-  const titlePt = Number(opts.titlePt ?? 64);
-  const bodyPt  = Number(opts.bodyPt  ?? 34);
 
-  const cardTop = Math.floor((H - cardH)/2);
-  const titleY  = cardTop + 42;
-  const bodyY   = cardTop + 120;
+  // Layout constants
+  const margin = 64;                  // breathing room from screen edges
+  const maxCardH = H - margin * 2;    // card can grow up to this height
+  const cardW = Math.round(W * 0.78); // fixed card width (looks nice)
+  const bodyW = cardW - 140;          // inner text width
+
+  // Paddings inside the card
+  const padTop = 42;
+  const gapTitleBody = 40;
+  const padBottom = 48;
+
+  // Start sizes; we’ll auto-shrink if needed
+  let titlePt = Number(opts.titlePt ?? 64);
+  let bodyPt  = Number(opts.bodyPt  ?? 34);
 
   const titleText = String(title);
-  const bodyText  = Array.isArray(bodyLines) ? bodyLines.join("\\n") : String(bodyLines);
+  const bodyText  = Array.isArray(bodyLines) ? bodyLines.join('\n') : String(bodyLines);
 
-  // base
-  const base = path.join(tmp,'base.png');
-  run(['convert','-size',`${W}x${H}`,`xc:${theme.bg}`,q(base)].join(' '));
+  // Helper to render text PNGs and return their heights
+  function renderTextAndMeasure(ptTitle, ptBody) {
+    const titlePng = path.join(tmp, 'title.png');
+    const bodyPng  = path.join(tmp, 'body.png');
 
-  // card with subtle border
-  const card = path.join(tmp,'card.png');
-  const draw1 = `roundrectangle 0,0 ${cardW-1},${cardH-1} 36,36`;
-  const draw2 = `roundrectangle 1,1 ${cardW-2},${cardH-2} 36,36`;
-  run(['convert','-size',`${cardW}x${cardH}`,'xc:none','-fill',q('rgba(255,255,255,0.06)'),
-       '-draw',q(draw1),'-stroke',q('#7aa2f744'),'-strokewidth','2','-draw',q(draw2),q(card)].join(' '));
+    // Title
+    run([
+      'convert', '-background', 'none', '-fill', q(theme.accent), '-font', q(theme.sans),
+      '-pointsize', String(ptTitle), '-size', `${bodyW}x`,
+      q('caption:' + titleText),
+      q(titlePng)
+    ].join(' '));
 
-  // title (inline caption)
-  const titlePng = path.join(tmp,'title.png');
-  run(['convert','-background','none','-fill',q(theme.accent),'-font',q(theme.sans),
-       '-pointsize',String(titlePt),'-size',`${bodyW}x`, q('caption:' + titleText), q(titlePng)].join(' '));
+    // Body
+    run([
+      'convert', '-background', 'none', '-fill', q(theme.fg), '-font', q(theme.sans),
+      '-pointsize', String(ptBody), '-size', `${bodyW}x`,
+      q('caption:' + bodyText),
+      q(bodyPng)
+    ].join(' '));
 
-  // body (inline caption)
-  const bodyPng = path.join(tmp,'body.png');
-  run(['convert','-background','none','-fill',q(theme.fg),'-font',q(theme.sans),
-       '-pointsize',String(bodyPt),'-size',`${bodyW}x`, q('caption:' + bodyText), q(bodyPng)].join(' '));
+    const titleH = Number(run(`identify -format "%h" ${q(titlePng)}`));
+    const bodyH  = Number(run(`identify -format "%h" ${q(bodyPng)}`));
+    return { titlePng, bodyPng, titleH, bodyH };
+  }
 
-  // compose: base + card(center) + title + body
-  const s1 = path.join(tmp,'s1.png');
-  run(['convert', q(base), q(card), '-gravity','center','-composite', q(s1)].join(' '));
-  const s2 = path.join(tmp,'s2.png');
-  run(['convert', q(s1), q(titlePng), '-gravity','north','-geometry',`+0+${titleY}`, '-composite', q(s2)].join(' '));
-  run(['convert', q(s2), q(bodyPng),  '-gravity','north','-geometry',`+0+${bodyY}`,  '-composite', q(outPath)].join(' '));
+  // First render and measure
+  let { titlePng, bodyPng, titleH, bodyH } = renderTextAndMeasure(titlePt, bodyPt);
+
+  // Compute needed card height; grow card up to max; if still too tall, shrink font
+  function neededHeight() { return padTop + titleH + gapTitleBody + bodyH + padBottom; }
+
+  let need = neededHeight();
+  let cardH = Math.min(maxCardH, Math.max(Math.round(H * 0.40), need)); // at least 40% of screen height
+
+  let attempts = 0;
+  while (need > maxCardH && attempts < 12) {
+    // Shrink body more aggressively, title slightly
+    bodyPt = Math.max(20, bodyPt - 2);
+    titlePt = Math.max(36, Math.round(titlePt * 0.96));
+
+    ({ titlePng, bodyPng, titleH, bodyH } = renderTextAndMeasure(titlePt, bodyPt));
+    need = neededHeight();
+    cardH = Math.min(maxCardH, Math.max(Math.round(H * 0.40), need));
+    attempts++;
+  }
+
+  // Base canvas
+  const base = path.join(tmp, 'base.png');
+  run(['convert', '-size', `${W}x${H}`, `xc:${theme.bg}`, q(base)].join(' '));
+
+  // Card with subtle border, sized to content
+  const card = path.join(tmp, 'card.png');
+  const draw1 = `roundrectangle 0,0 ${cardW - 1},${cardH - 1} 36,36`;
+  const draw2 = `roundrectangle 1,1 ${cardW - 2},${cardH - 2} 36,36`;
+  run([
+    'convert', '-size', `${cardW}x${cardH}`, 'xc:none',
+    '-fill', q('rgba(255,255,255,0.06)'), '-draw', q(draw1),
+    '-stroke', q('#7aa2f744'), '-strokewidth', '2', '-draw', q(draw2),
+    q(card)
+  ].join(' '));
+
+  // Compose: center the card, then place title/body by measured heights
+  const cardTop = Math.floor((H - cardH) / 2);
+  const titleY  = cardTop + padTop;
+  const bodyY   = titleY + titleH + gapTitleBody;
+
+  const s1 = path.join(tmp, 's1.png');
+  run(['convert', q(base), q(card), '-gravity', 'center', '-composite', q(s1)].join(' '));
+
+  const s2 = path.join(tmp, 's2.png');
+  run(['convert', q(s1), q(titlePng), '-gravity', 'north', '-geometry', `+0+${titleY}`, '-composite', q(s2)].join(' '));
+
+  run(['convert', q(s2), q(bodyPng), '-gravity', 'north', '-geometry', `+0+${bodyY}`, '-composite', q(outPath)].join(' '));
 
   fs.rmSync(tmp, { recursive: true, force: true });
 }
+
 function drawCard(title, bodyLines, frameNo, outDir){
   const out = path.join(outDir, `frame_${String(frameNo).padStart(4,'0')}.png`);
   writeCardFrame(title, bodyLines, out, {});

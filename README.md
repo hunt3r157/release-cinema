@@ -108,3 +108,14 @@ MIT © Release Cinema contributors
 - [ ] Optional SVG-only output
 - [ ] “Typewriter” speed controls for simulation
 - [ ] Attach artifacts with SHA‑pinned action
+
+
+<!-- GALLERY:START -->
+## Gallery
+
+| Latest Trailer | CLI Simulation |
+| --- | --- |
+| [![Trailer](assets/trailer.gif)](assets/trailer.mp4) | ![CLI Simulation](assets/cli_sim.gif) |
+
+_Last updated: 2025-08-17 • Range: `v0.2.5` → `HEAD`_
+<!-- GALLERY:END -->

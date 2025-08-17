@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// -------- flags --------
+// -------- flag parsing --------
 const argv = process.argv.slice(2);
 function parseFlags(argv){
   const out = {};
@@ -36,7 +36,7 @@ function parseFlags(argv){
 const cmd = (argv[0] && !argv[0].startsWith('--')) ? argv[0] : 'render';
 const flags = parseFlags(argv);
 
-// -------- theme (Option A: JSON + --set) --------
+// -------- themes (Option A: JSON + --set) --------
 const DEFAULT_THEME = {
   bg: '#0b0f14',
   fg: '#e5e9f0',
@@ -112,7 +112,7 @@ function applyPreset(t, name){
 }
 if (flags.preset) theme = applyPreset(theme, String(flags.preset));
 
-// -------- branding / watermark (Phase 1) --------
+// -------- branding / watermark --------
 const BRAND = {
   logo: flags.brand ? String(flags.brand) : null,
   gravity: String(flags['brand-gravity'] ?? 'southeast'),
@@ -125,7 +125,7 @@ const WATERMARK = {
   gravity: String(flags['watermark-gravity'] ?? BRAND.gravity),
   geom: String(flags['watermark-geom'] ?? BRAND.geom),
   pt: Number(flags['watermark-pt'] ?? 22),
-  fill: String(flags['watermark-fill'] ?? theme.fg)
+  fill: String(flags['watermark-fill'] ?? (theme.fg || '#e5e9f0'))
 };
 
 // -------- utils --------
@@ -170,10 +170,10 @@ function applyBranding(outPath){
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 
-// -------- git analyze --------
+// -------- git analyze & range detection --------
 function resolveRange(flags) {
   if (flags.auto) {
-    // If HEAD is exactly on a tag, diff previous tag -> this tag.
+    // If HEAD is exactly on a tag (tag build), diff previous tag -> this tag.
     try {
       const headTag = run('git describe --tags --exact-match');
       if (headTag) {
@@ -194,8 +194,6 @@ function resolveRange(flags) {
   return { from: flags.from, to: flags.to };
 }
 
-
-}
 function analyze(from, to) {
   const fmt = '%h|%an|%ad|%s';
   const log = run(`git log --date=short --pretty=format:"${fmt}" ${from}..${to}`);
@@ -281,9 +279,7 @@ function writeCardFrame(title, bodyLines, outPath, opts = {}) {
   run(['convert', q(s1), q(titlePng), '-gravity','north','-geometry',`+0+${titleY}`, '-composite', q(s2)].join(' '));
   run(['convert', q(s2), q(bodyPng),  '-gravity','north','-geometry',`+0+${bodyY}`,  '-composite', q(outPath)].join(' '));
 
-  // Branding/text watermark (optional)
   applyBranding(outPath);
-
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 function drawCard(title, bodyLines, frameNo, outDir){
@@ -307,10 +303,7 @@ function writeTTYImage(text, outPath, opts={}) {
        '-pointsize','28', q('caption:' + body), q(cap)].join(' '));
 
   run(['convert', q(base), q(cap), '-gravity','northwest','-geometry','+40+40','-composite', q(outPath)].join(' '));
-
-  // Branding on CLI frames too
   applyBranding(outPath);
-
   fs.rmSync(tmp, { recursive: true, force: true });
 }
 function drawTTY(lines, frameNo, outDir){
@@ -406,15 +399,25 @@ Usage:
 `);
 }
 
-// -------- main --------
-(async () => {
+// -------- run only when executed directly --------
+const isMain = (() => {
   try {
-    if (cmd === 'analyze') {
-      if (!isGitRepo()) fail('Not a git repository.');
-      const { from, to } = resolveRange(flags);
-      console.log(JSON.stringify(analyze(from, to), null, 2));
-    } else if (cmd === 'render') { render(flags); }
-    else if (cmd === 'simulate') { simulate(flags); }
-    else { usage(); process.exit(1); }
-  } catch (e) { console.error(e.message || String(e)); process.exit(2); }
+    const thisFile = fileURLToPath(import.meta.url);
+    const invoked = process.argv[1] ? path.resolve(process.argv[1]) : '';
+    return thisFile === invoked;
+  } catch { return true; }
 })();
+
+if (isMain) {
+  (async () => {
+    try {
+      if (cmd === 'analyze') {
+        if (!isGitRepo()) fail('Not a git repository.');
+        const { from, to } = resolveRange(flags);
+        console.log(JSON.stringify(analyze(from, to), null, 2));
+      } else if (cmd === 'render') { render(flags); }
+      else if (cmd === 'simulate') { simulate(flags); }
+      else { usage(); process.exit(1); }
+    } catch (e) { console.error(e.message || String(e)); process.exit(2); }
+  })();
+}

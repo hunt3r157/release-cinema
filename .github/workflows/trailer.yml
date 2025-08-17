@@ -42,7 +42,7 @@ jobs:
           convert -version
           ffmpeg -version
 
-      # --- Render trailer for PRs: exact base..head range ---
+      # PR: render exact base..head range
       - name: Render trailer (PR) — ${{ matrix.name }}
         if: ${{ github.event_name == 'pull_request' }}
         env:
@@ -62,11 +62,10 @@ jobs:
             --watermark-geom +32+32 \
             --out-dir assets/${{ matrix.name }}
 
-          # normalize filenames to include variant name
           mv assets/${{ matrix.name }}/trailer.gif assets/trailer-${{ matrix.name }}.gif
           mv assets/${{ matrix.name }}/trailer.mp4 assets/trailer-${{ matrix.name }}.mp4
 
-      # --- Render trailer on tag pushes (auto range) ---
+      # Tags: render auto (last tag..HEAD)
       - name: Render trailer (tag) — ${{ matrix.name }}
         if: ${{ startsWith(github.ref, 'refs/tags/') }}
         run: |
@@ -86,15 +85,16 @@ jobs:
           mv assets/${{ matrix.name }}/trailer.gif assets/trailer-${{ matrix.name }}.gif
           mv assets/${{ matrix.name }}/trailer.mp4 assets/trailer-${{ matrix.name }}.mp4
 
-      - name: Upload artifacts (all variants)
+      - name: Upload artifact (this variant)
         uses: actions/upload-artifact@v4
         with:
-          name: trailer-bundle
+          name: trailer-${{ matrix.name }}     # unique per matrix
           path: |
-            assets/trailer-*.gif
-            assets/trailer-*.mp4
+            assets/trailer-${{ matrix.name }}.gif
+            assets/trailer-${{ matrix.name }}.mp4
+          if-no-files-found: error
+          overwrite: true
 
-      # Inline previews in the run Summary (one per job)
       - name: Add Action Summary preview (this variant)
         if: always()
         run: |
@@ -105,7 +105,6 @@ jobs:
           echo '"/>' >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-      # PR comment with link to this run (artifacts + inline previews)
       - name: Comment on PR with links
         if: ${{ github.event_name == 'pull_request' && matrix.name == 'linkedin-dark' }}
         uses: actions/github-script@v7
@@ -130,9 +129,20 @@ jobs:
               body
             });
 
-      # Attach all variants to the Release (tag builds)
-      - name: Attach to Release (all variants)
-        if: ${{ startsWith(github.ref, 'refs/tags/') && matrix.name == 'linkedin-dark' }}
+  # Separate job to gather all artifacts and attach on tag builds
+  release_upload:
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: trailer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all trailer artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: trailer-*
+          path: assets
+          merge-multiple: true
+
+      - name: Attach all variants to Release
         uses: softprops/action-gh-release@v2
         with:
           files: |

@@ -1,6 +1,6 @@
 {
   "name": "release-cinema",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Render a short trailer (GIF/MP4) for your releases + a CLI simulation of the release run. Zero-dep Node CLI + GitHub Action.",
   "license": "MIT",
   "type": "module",

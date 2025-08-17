@@ -1,0 +1,25 @@
+{
+  "bg": "#0b0f14",
+  "fg": "#e5e9f0",
+  "accent": "#3a82f7",
+  "mono": "DejaVu-Sans-Mono",
+  "sans": "DejaVu-Sans",
+  "width": 1280,
+  "height": 720,
+
+  "card": {
+    "radius": 36,
+    "glass": "rgba(255,255,255,0.06)",
+    "stroke": "#7aa2f744"
+  },
+  "spacing": {
+    "margin": 64,
+    "padTop": 42,
+    "gapTitleBody": 40,
+    "padBottom": 48
+  },
+  "typography": {
+    "titlePt": 64,
+    "bodyPt": 34
+  }
+}

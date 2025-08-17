@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Release Cinema — render release trailers + CLI simulation (Node >= 18)
+// Release Cinema — render release trailers + CLI simulation + multi-repo (Node >= 18)
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -140,6 +140,7 @@ function isGitRepo() { try { run('git rev-parse --is-inside-work-tree'); return 
 function q(s){ return '"' + String(s).replace(/(["\\$`])/g,'\\$1') + '"'; }
 function fail(msg){ console.error('✖ ' + msg); process.exit(2); }
 
+// branding apply
 function applyBranding(outPath){
   if (!BRAND.logo && !WATERMARK.text) return;
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rc-'));
@@ -170,7 +171,7 @@ function applyBranding(outPath){
   } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 }
 
-// -------- git analyze & range detection --------
+// -------- git range & analysis (single repo) --------
 function resolveRange(flags) {
   if (flags.auto) {
     // If HEAD is exactly on a tag (tag build), diff previous tag -> this tag.
@@ -193,7 +194,6 @@ function resolveRange(flags) {
   if (!flags.from || !flags.to) fail('Provide --from and --to, or use --auto');
   return { from: flags.from, to: flags.to };
 }
-
 function analyze(from, to) {
   const fmt = '%h|%an|%ad|%s';
   const log = run(`git log --date=short --pretty=format:"${fmt}" ${from}..${to}`);
@@ -327,6 +327,43 @@ function compile(outDir, outBase='trailer', slideSeconds=3, fpsOut=30) {
   return { gif, mp4 };
 }
 
+// -------- multi-repo helpers --------
+function runGit(repo, args){ return run(`git -C ${q(repo)} ${args}`); }
+function isRepo(repo){ try { runGit(repo, 'rev-parse --is-inside-work-tree'); return true; } catch { return false; } }
+
+function resolveRangeForRepo(repo, want) {
+  if (want && want.auto) {
+    try {
+      const headTag = runGit(repo, 'describe --tags --exact-match');
+      if (headTag) {
+        const prev = runGit(repo, 'describe --tags --abbrev=0 ' + headTag + '^');
+        return { from: prev, to: headTag };
+      }
+    } catch {}
+    try {
+      const last = runGit(repo, 'describe --tags --abbrev=0');
+      return { from: last, to: 'HEAD' };
+    } catch {}
+    const first = runGit(repo, 'rev-list --max-parents=0 HEAD').split('\n')[0];
+    return { from: first, to: 'HEAD' };
+  }
+  if (!want || !want.from || !want.to) fail('Provide --from and --to, or use --auto');
+  return { from: want.from, to: want.to };
+}
+function analyzeRepo(repo, from, to) {
+  const fmt = '%h|%an|%ad|%s';
+  const log = runGit(repo, `log --date=short --pretty=format:"${fmt}" ${from}..${to}`);
+  const lines = log ? log.split('\n') : [];
+  const commits = lines.filter(Boolean).map(l => { const [sha, author, date, subject] = l.split('|'); return { sha, author, date, subject }; });
+  const filesChanged = runGit(repo, `diff --name-only ${from}..${to}`).split('\n').filter(Boolean);
+  const topDirsMap = new Map(); filesChanged.forEach(f => { const d = f.split('/')[0] || f; topDirsMap.set(d, (topDirsMap.get(d)||0)+1); });
+  const topDirs = [...topDirsMap.entries()].sort((a,b)=>b[1]-a[1]).slice(0,5).map(([name,count])=>({name,count}));
+  const byAuthor = new Map(); commits.forEach(c => byAuthor.set(c.author, (byAuthor.get(c.author)||0)+1));
+  const contributors = [...byAuthor.entries()].sort((a,b)=>b[1]-a[1]).map(([author,count])=>({author,count}));
+  const repoName = path.basename(path.resolve(repo));
+  return { repo: repoName, range: { from, to }, stats: { commits: commits.length, files: filesChanged.length, dirs: topDirs.length }, topCommits: commits.slice(0,5), contributors, topDirs };
+}
+
 // -------- commands --------
 function render(flags) {
   if (!isGitRepo()) fail('Not a git repository.');
@@ -358,6 +395,53 @@ function render(flags) {
   console.log(`✓ Wrote ${gif}`);
   console.log(`✓ Wrote ${mp4}`);
 }
+
+function multi(flags) {
+  ensureTools();
+  const outDir = flags['out-dir'] ? String(flags['out-dir']) : 'assets';
+  fs.mkdirSync(outDir, { recursive: true });
+
+  // repos list: repeated --repos or comma-separated
+  const list = coerceArray(flags.repos).flatMap(s => String(s).split(',')).map(s=>s.trim()).filter(Boolean);
+  if (list.length < 2) fail('Provide at least two repos via --repos ../repoA,../repoB or repeat --repos.');
+
+  const layout = String(flags.layout || 'sequential');
+  if (layout !== 'sequential') {
+    console.warn(`(info) layout=${layout} not implemented yet; falling back to sequential.`);
+  }
+
+  let f = 0;
+  drawCard('RELEASE CINEMA — MULTI', [`Repos: ${list.length}`, new Date().toISOString()], ++f, outDir);
+
+  for (const repo of list) {
+    const repoAbs = path.resolve(repo);
+    const repoName = path.basename(repoAbs);
+
+    if (!fs.existsSync(repoAbs) || !isRepo(repoAbs)) {
+      drawCard(`SKIP: ${repoName}`, ['Not a git repository'], ++f, outDir);
+      continue;
+    }
+
+    const range = resolveRangeForRepo(repoAbs, flags.auto ? { auto:true } : { from: flags.from, to: flags.to });
+    const a = analyzeRepo(repoAbs, range.from, range.to);
+
+    // slides per repo
+    drawCard(`${repoName}`, [`Range: ${a.range.from} → ${a.range.to}`, '', `Commits: ${a.stats.commits}    Files changed: ${a.stats.files}`], ++f, outDir);
+
+    const topc = a.topCommits.length ? a.topCommits.map(c=>`• ${c.sha} — ${c.subject} (${c.author})`) : ['• No recent commits'];
+    drawCard(`HIGHLIGHTS — ${repoName}`, topc.slice(0,5), ++f, outDir);
+
+    const dirs = a.topDirs.map(d=>`• ${d.name} — ${d.count} file(s)`);
+    drawCard(`CHANGED AREAS — ${repoName}`, (dirs.length?dirs:['• —']), ++f, outDir);
+  }
+
+  const slideSeconds = Math.max(1, Number(flags['slide-seconds'] ?? 3));
+  const fpsOut = Math.max(1, Number(flags['fps'] ?? 30));
+  const { gif, mp4 } = compile(outDir, 'trailer', slideSeconds, fpsOut);
+  console.log(`✓ Wrote ${gif}`);
+  console.log(`✓ Wrote ${mp4}`);
+}
+
 function simulate(flags) {
   ensureTools();
   const out = flags.out ? String(flags.out) : 'assets/cli_sim.gif';
@@ -394,6 +478,11 @@ Usage:
     [--watermark "Your Org"] [--watermark-pt 22]
     [--watermark-gravity southeast] [--watermark-geom +40+40]
 
+  release-cinema multi --repos <pathA,pathB[,...]> [--auto|--from <ref> --to <ref>]
+    [--layout sequential] [--out-dir assets] [--slide-seconds 3] [--fps 30]
+    [--theme ...] [--preset ...] [--brand ...] [--watermark ...]
+    (sequential montage across multiple repos)
+
   release-cinema analyze --from <ref> --to <ref>
   release-cinema simulate [--out assets/cli_sim.gif]
 `);
@@ -416,6 +505,7 @@ if (isMain) {
         const { from, to } = resolveRange(flags);
         console.log(JSON.stringify(analyze(from, to), null, 2));
       } else if (cmd === 'render') { render(flags); }
+      else if (cmd === 'multi') { multi(flags); }
       else if (cmd === 'simulate') { simulate(flags); }
       else { usage(); process.exit(1); }
     } catch (e) { console.error(e.message || String(e)); process.exit(2); }

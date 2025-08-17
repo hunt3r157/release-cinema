@@ -173,13 +173,29 @@ function applyBranding(outPath){
 // -------- git analyze --------
 function resolveRange(flags) {
   if (flags.auto) {
-    let to = 'HEAD', from = '';
-    try { from = run('git describe --tags --abbrev=0'); }
-    catch { from = run('git rev-list --max-parents=0 HEAD').split('\n').at(0); }
-    return { from, to };
+    // If HEAD is exactly on a tag, diff previous tag -> this tag.
+    try {
+      const headTag = run('git describe --tags --exact-match');
+      if (headTag) {
+        const prev = run('git describe --tags --abbrev=0 ' + headTag + '^');
+        return { from: prev, to: headTag };
+      }
+    } catch {}
+
+    // Otherwise: last tag -> HEAD
+    try {
+      const last = run('git describe --tags --abbrev=0');
+      return { from: last, to: 'HEAD' };
+    } catch {}
+
+    // No tags yet: first commit -> HEAD
+    const first = run('git rev-list --max-parents=0 HEAD').split('\n')[0];
+    return { from: first, to: 'HEAD' };
   }
   if (!flags.from || !flags.to) fail('Provide --from and --to, or use --auto');
   return { from: flags.from, to: flags.to };
+}
+
 }
 function analyze(from, to) {
   const fmt = '%h|%an|%ad|%s';

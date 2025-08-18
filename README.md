@@ -11,35 +11,101 @@
 
 ---
 
-## What it does
-- Analyzes a range (`--from … --to …`) and extracts:
-  - **Top commits** (subject lines)
-  - **Contributors** (by count)
-  - **Files changed** & top directories
-- Renders a **trailer** (PNG frames → GIF/MP4 via ImageMagick + ffmpeg)
-- Generates an animated **terminal simulation** of the release run (tag → push → CI steps)
+## Table of Contents
+- [Overview](#overview)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [Usage](#usage)
+  - [Commands](#commands)
+  - [Common Flags](#common-flags)
+  - [Exit Codes](#exit-codes)
+- [GitHub Action](#github-action)
+- [Outputs](#outputs)
+- [Examples / Gallery](#examples--gallery)
+- [Configuration](#configuration)
+- [FAQ / Troubleshooting](#faq--troubleshooting)
+- [Security](#security)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+- [Links](#links)
 
-> System tools needed to render: **ImageMagick** and **ffmpeg**. The GitHub Action installs these automatically on ubuntu runners.
+## Overview
+Release Cinema turns a commit/tag range into:
+- A **cinematic trailer** (PNG frames → **GIF/MP4**) that highlights:
+  - Top commits (subject lines)
+  - Top contributors
+  - Files changed & top directories
+- A **CLI “release run” simulation** GIF (tag → push → CI steps)
+- A **pure analysis** mode that prints JSON (no rendering)
 
----
+It’s a **zero-dependency Node CLI** at runtime (shells out to system tools) and works locally or in CI.
 
-## Quick start (local)
+## Requirements
+- **Node**: 20+
+- **git** on PATH
+- **ImageMagick** and **ffmpeg** on PATH  
+  - macOS: `brew install imagemagick ffmpeg`  
+  - Ubuntu: `sudo apt-get update && sudo apt-get install -y imagemagick ffmpeg fonts-dejavu-core`
 
+## Install
+Use one-off with npx:
 ```bash
-# ensure you have imagemagick + ffmpeg installed
-# macOS: brew install imagemagick ffmpeg
-# ubuntu: sudo apt-get update && sudo apt-get install -y imagemagick ffmpeg fonts-dejavu-core
+npx release-cinema --help
+```
 
-# render trailer for last tag to HEAD
+Or add to your project:
+```bash
+# npm
+npm i -D release-cinema
+# pnpm
+pnpm add -D release-cinema
+# bun
+bun add -d release-cinema
+```
+
+## Quick Start
+Render a trailer for the last tag → `HEAD` and a CLI simulation:
+```bash
+# trailer (GIF/MP4) and CLI simulation (GIF)
 npx release-cinema render --auto --out-dir assets
-
-# also render the CLI simulation
 npx release-cinema simulate --out assets/cli_sim.gif
 ```
 
-## GitHub Action usage
-Add this workflow to generate and attach artifacts to the Release when you push a tag:
+## Usage
 
+### Commands
+```bash
+release-cinema render    # produce PNG frames -> GIF/MP4 via ImageMagick/ffmpeg
+release-cinema simulate  # produce animated terminal simulation GIF
+release-cinema analyze   # print JSON analysis only (no rendering)
+```
+
+### Common Flags
+| Flag | Applies to | Description |
+|------|------------|-------------|
+| `--auto` | render / analyze | Auto-detect previous tag → `HEAD` |
+| `--from <tag|sha>` | render / analyze | Explicit start of range |
+| `--to <tag|sha>` | render / analyze | Explicit end of range (default `HEAD`) |
+| `--out-dir <path>` | render | Output directory for trailer assets (default `assets`) |
+| `--out <file>` | simulate | Output GIF path for the CLI simulation |
+
+**Examples**
+```bash
+# explicit range
+release-cinema render --from v0.1.0 --to v0.1.1 --out-dir assets
+
+# analysis only (great for debugging)
+release-cinema analyze --from v0.1.0 --to v0.1.1
+```
+
+### Exit Codes
+- `0` success  
+- `2` runtime error (e.g., not a git repo)
+
+## GitHub Action
+Attach a trailer + CLI simulation to every GitHub Release created from a tagged push:
 ```yaml
 name: Release
 on:
@@ -69,53 +135,60 @@ jobs:
             assets/cli_sim.gif
 ```
 
----
+## Outputs
+By default, you’ll get:
+- `assets/trailer.gif`
+- `assets/trailer.mp4`
+- `assets/cli_sim.gif`
 
-## CLI
+## Examples / Gallery
+> These files can be generated locally or by the Action and committed to `assets/`.
 
-```bash
-# auto-detect previous tag range → HEAD
-release-cinema render --auto --out-dir assets
+![Animated release trailer showing commits, contributors, and changed areas](assets/trailer.gif)
+![Terminal simulation of a release run (tag → push → CI steps)](assets/cli_sim.gif)
 
-# explicit range
-release-cinema render --from v0.1.0 --to v0.1.1 --out-dir assets
+## Configuration
+- **Range selection**  
+  - Use `--auto` for previous tag → `HEAD`, or specify `--from/--to`.
+- **Output control**  
+  - Use `--out-dir` to choose where trailer assets are written.  
+  - Use `simulate --out` to pick the simulation GIF path.
+- **CI rendering**  
+  - Ubuntu runners install `fonts-dejavu-core` to normalize font rendering.
 
-# just the terminal simulation GIF
-release-cinema simulate --out assets/cli_sim.gif
+## FAQ / Troubleshooting
+**ImageMagick or ffmpeg not found**  
+Install them (see Requirements) and ensure they’re on `PATH`.
 
-# analysis only (prints JSON)
-release-cinema analyze --from v0.1.0 --to v0.1.1
-```
+**No prior tag found when using `--auto`**  
+Create an initial tag first: `git tag v0.1.0 && git push --tags`.
 
-**Exit codes**
-- `0` success
-- `2` runtime error (e.g., no git repo)
+**CI font/rendering looks different**  
+Use the workflow above (installs `fonts-dejavu-core`).
 
----
+**“Not a git repository” or empty analysis**  
+Run commands from a repo with the history/tags you expect.
 
 ## Security
-No network calls. Reads `git` metadata and shells out to ImageMagick/ffmpeg for rendering.
+No network calls. The CLI reads local `git` metadata and shells out to ImageMagick/ffmpeg to render media.
 
----
+## Roadmap
+- Per-frame theme customization  
+- Optional SVG-only output  
+- “Typewriter” speed controls for simulation  
+- Attach artifacts with SHA-pinned action
+
+## Contributing
+PRs welcome! A good place to start:
+1. Open an issue describing the change.
+2. Fork and create a feature branch.
+3. If your change affects rendering, update assets and include before/after screenshots or GIFs in the PR.
+4. If relevant, run the GitHub Action from your fork to validate attachments.
 
 ## License
 MIT © Release Cinema contributors
 
----
-
-## Roadmap
-- [ ] Per-frame theme customization
-- [ ] Optional SVG-only output
-- [ ] “Typewriter” speed controls for simulation
-- [ ] Attach artifacts with SHA‑pinned action
-
-
-<!-- GALLERY:START -->
-## Gallery
-
-| Latest Trailer | CLI Simulation |
-| --- | --- |
-| [![Trailer](assets/trailer.gif)](assets/trailer.mp4) | ![CLI Simulation](assets/cli_sim.gif) |
-
-_Last updated: 2025-08-17 • Range: `v0.2.5` → `HEAD`_
-<!-- GALLERY:END -->
+## Links
+- **npm**: https://www.npmjs.com/package/release-cinema  
+- **GitHub Releases**: https://github.com/hunt3r157/release-cinema/releases  
+- **Issues**: https://github.com/hunt3r157/release-cinema/issues

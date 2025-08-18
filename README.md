@@ -192,3 +192,14 @@ MIT © Release Cinema contributors
 - **npm**: https://www.npmjs.com/package/release-cinema  
 - **GitHub Releases**: https://github.com/hunt3r157/release-cinema/releases  
 - **Issues**: https://github.com/hunt3r157/release-cinema/issues
+
+
+<!-- GALLERY:START -->
+## Gallery
+
+| Latest Trailer | CLI Simulation |
+| --- | --- |
+| [![Trailer](assets/trailer.gif)](assets/trailer.mp4) | ![CLI Simulation](assets/cli_sim.gif) |
+
+_Last updated: 2025-08-18 • Range: `v0.2.5` → `HEAD`_
+<!-- GALLERY:END -->
